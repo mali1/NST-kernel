@@ -1,0 +1,106 @@
+config FB_OMAP3EP
+	tristate "Software-based frame buffer support for E-Paper on OMAP3"
+	depends on FB && ARCH_OMAP3 && !FB_OMAP
+	select FB_SYS_FILLRECT
+	select FB_SYS_COPYAREA
+	select FB_SYS_IMAGEBLIT
+	select FB_SYS_FOPS
+	select FB_DEFERRED_IO
+	help
+	  This driver implements support for E-Paper screens using OMAP3
+	  without external hardware controller.
+	  If unsure, say N.
+
+config FB_OMAP3EP_MANAGE_BORDER
+	  bool "Manage EPD border"
+	  depends on FB_OMAP3EP
+	  default "n"
+	help
+	  If set, exposes a border interface in sysfs.
+	  Only set this if your hardware supports it. If unsure, say N.
+
+choice
+	depends on FB_OMAP3EP
+	prompt "Page-flip burst mode of operation"
+	default FB_OMAP3EP_PGFLIP_REPLACE
+	help
+	  Select the algorithm for dealing with superfluous page flip
+	  burst requests.
+
+config FB_OMAP3EP_PGFLIP_REPLACE
+	boolean "Immediately replace request over the currently pending one"
+
+config FB_OMAP3EP_PGFLIP_DEFER
+	boolean "Defer request in hope of a settled down video data later"
+
+endchoice
+
+choice
+	depends on FB_OMAP3EP
+	prompt "Drive Epaper Panel via "
+        default FB_OMAP3EP_DRIVE_EPAPER_PANEL_DSS
+	help
+	  Select drive epaper panel via DSS or via GPMC.
+
+config FB_OMAP3EP_DRIVE_EPAPER_PANEL_DSS
+	boolean "DSS"
+	help
+	  Select drive epaper panel via DSS;
+
+config FB_OMAP3EP_DRIVE_EPAPER_PANEL_GPMC
+	boolean "GPMC"
+	help
+	 Select drive epaper panel via GPMC;
+
+endchoice
+
+choice
+	depends on FB_OMAP3EP
+	prompt "Papyrus PMIC power management algorithm"
+	default FB_OMAP3EP_PAPYRUS_PM_VZERO
+	help
+	  Select the algorithm for driving Papyrus PMIC. Please consult
+	  the Papyrus TRM and Errata documents for more information.
+	  WARNING: Be VERY careful with this option. You might blow your
+	  Papyrus chip if option is not chosen correctly!
+
+config FB_OMAP3EP_PAPYRUS_PM_OPTIMAL
+	boolean "Optimal PM for papyrus"
+	help
+	  Assume that Papyrus has no VZero issue and drive Papyrus optimally.
+
+config FB_OMAP3EP_PAPYRUS_PM_VZERO
+	boolean "VZero errata workaround"
+	help
+	  Drive Papyrus to deep SLEEP, albeit with a 4s dwell time penalty
+	  due to VZero issue.
+
+config FB_OMAP3EP_PAPYRUS_PM_STANDBY
+	boolean "Keep at STANDBY instead of deep SLEEP mode"
+	help
+	  Prevent entering SLEEP mode. Papyrus will be kept at STANDBY where
+	  it consumes about 130uA, instead of less than 20uA when in SLEEP
+	  mode.
+	  WARNING: Make sure you PIN MUX does not turn off WAKEUP during OFF!
+
+endchoice
+
+
+config FB_OMAP3EP_CONSISTENT_DMA_SIZE
+	int "Consistent DMA memory size (MB)"
+	depends on FB_OMAP3EP
+	range 1 14
+	default 8
+	help
+	  Increase the DMA consistent memory size according to your video
+	  memory needs, for example if you want to use multiple planes.
+	  The size must be 2MB aligned.
+	  If unsure say 1.
+
+config FB_OMAP3EPFB_DEFERREDIO
+    bool "Utilize Deferred IO"
+    depends on FB_OMAP3EP
+    default "n"
+    help
+      If page flip or IOCTLs are used there is no need of DEFERREDIO
+
