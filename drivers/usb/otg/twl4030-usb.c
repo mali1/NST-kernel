@@ -285,8 +285,12 @@ struct twl4030_usb {
 	u8			asleep;
 	bool			irq_enabled;
 	struct delayed_work	dwork;
+	struct work_struct	vbus_work;
+	
     struct wake_lock irq_wake_lock;
 };
+
+int twl_forcelink = 0;
 
 /* delayed execution of the IRQ by seconds */
 static int bottom_timeout = 2;
@@ -415,8 +419,12 @@ static enum linkstat twl4030_usb_linkstat(struct twl4030_usb *twl)
 			linkstat = USB_LINK_ID;
 		else
 			linkstat = USB_LINK_VBUS;
-	} else
-		linkstat = USB_LINK_NONE;
+	} else {
+		if (twl_forcelink)
+			linkstat = USB_LINK_VBUS;
+		else
+			linkstat = USB_LINK_NONE;
+	}
 
 	dev_dbg(twl->dev, "HW_CONDITIONS 0x%02x/%d; link %d\n",
 			status, status, linkstat);
@@ -427,7 +435,7 @@ static enum linkstat twl4030_usb_linkstat(struct twl4030_usb *twl)
 
 	spin_lock_irq(&twl->lock);
 	twl->linkstat = linkstat;
-	if (linkstat == USB_LINK_ID) {
+	if (linkstat == USB_LINK_ID || twl_forcelink) {
 		twl->otg.default_a = true;
 		twl->otg.state = OTG_STATE_A_IDLE;
 	} else {
@@ -663,6 +671,45 @@ static int twl4030_set_suspend(struct otg_transceiver *x, int suspend)
 	return 0;
 }
 
+void *twl_superhack;
+void twl4030_kick_work(struct work_struct *work)
+{
+	struct twl4030_usb *twl = twl_superhack;
+	struct otg_transceiver x = twl->otg;
+
+	if (!twl_forcelink) {
+		twl4030_usb_clear_bits(twl,TWL4030_OTG_CTRL, TWL4030_OTG_CTRL_DRVVBUS);
+		/* Some sleep to hopefully let usb driver to notice the
+		 * disappearance */
+		msleep(100);
+		twl4030_usb_irq(0, twl);
+		return;
+	}
+
+	twl4030_usb_set_bits(twl,TWL4030_OTG_CTRL, TWL4030_OTG_CTRL_DRVVBUS);
+
+	/* Some sleep just in case to let the vbus to stabilize */
+	msleep(100);
+
+	if (x.link_force_active)
+		x.link_force_active(1);
+
+	twl4030_phy_resume(twl);
+
+	sysfs_notify(&twl->dev->kobj, NULL, "vbus");
+}
+
+void twl4030_kick(int on)
+{
+	struct twl4030_usb *twl = twl_superhack;
+
+	twl_forcelink = on;
+
+printk("forced usb vbus state change %d\n", on);
+
+	schedule_work(&twl->vbus_work);
+}
+
 static int twl4030_set_peripheral(struct otg_transceiver *x,
 		struct usb_gadget *gadget)
 {
@@ -670,6 +717,8 @@ static int twl4030_set_peripheral(struct otg_transceiver *x,
 
 	if (!x)
 		return -ENODEV;
+
+	twl4030_kick(0);
 
 	twl = xceiv_to_twl(x);
 	twl->otg.gadget = gadget;
@@ -685,6 +734,8 @@ static int twl4030_set_host(struct otg_transceiver *x, struct usb_bus *host)
 
 	if (!x)
 		return -ENODEV;
+
+	twl4030_kick(1);
 
 	twl = xceiv_to_twl(x);
 	twl->otg.host = host;
@@ -834,6 +885,8 @@ static int __init twl4030_usb_probe(struct platform_device *pdev)
 	if (!twl)
 		return -ENOMEM;
 
+	twl_superhack = twl;
+
 	twl->dev		= &pdev->dev;
 	if (pdata->bci_supply)
 		pdata->bci_supply->dev	= twl->dev;
@@ -848,6 +901,7 @@ static int __init twl4030_usb_probe(struct platform_device *pdev)
 
     wake_lock_init(&twl->irq_wake_lock, WAKE_LOCK_SUSPEND, "twl4030-irq");
 	INIT_DELAYED_WORK(&twl->dwork, twl4030_usb_irq_work);
+	INIT_WORK(&twl->vbus_work, twl4030_kick_work);
 
 	/* init spinlock for workqueue */
 	spin_lock_init(&twl->lock);
